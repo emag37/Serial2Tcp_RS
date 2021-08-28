@@ -1,9 +1,10 @@
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 use std::result::Result;
-use serialport::{SerialPort, COMPort};
-use std::net::{TcpListener, TcpStream};
+use serialport::{SerialPort};
+use std::net::{TcpStream};
 use std::io::{Read,Write};
+use std::option::Option;
 
 #[derive(Default, Clone)]
 pub struct BindingConfig {
@@ -15,14 +16,13 @@ pub struct BindingConfig {
 pub struct ActiveBinding {
     pub config : BindingConfig,
     active : Arc<AtomicBool>,
-    worker: std::thread::JoinHandle<()>,
+    worker: Option<std::thread::JoinHandle<()>>,
 }
 
-
-impl ActiveBinding {
-    pub fn destroy(mut self) {
+impl Drop for ActiveBinding {
+    fn drop(&mut self) {
         self.active.store(false, std::sync::atomic::Ordering::Release);
-        let _ = self.worker.join();
+        let _ = self.worker.take().unwrap().join();
     }
 }
 
@@ -33,6 +33,7 @@ fn start_tcp_read_thread(config: &BindingConfig, active_flag: Arc<AtomicBool>, c
         let (tcp_stream_write, _) = match tcp_listener.accept() {
             Ok(stream) => stream,
             Err(err) => {
+                println!("Accepting connection on: {}: {}", config.tcp_host, err);
                 active_flag.store(false, std::sync::atomic::Ordering::Release);
                 return
             }
@@ -42,6 +43,7 @@ fn start_tcp_read_thread(config: &BindingConfig, active_flag: Arc<AtomicBool>, c
         let tcp_stream_read =  match tcp_stream_write.try_clone() {
             Ok(stream) => stream,
             Err(err) => {
+                println!("Error cloning TCP stream for read: {}", err);
                 active_flag.store(false, std::sync::atomic::Ordering::Release);
                 return
             }
@@ -121,7 +123,7 @@ pub fn start_workers(config: &BindingConfig) -> Result<ActiveBinding, serialport
     let tcp_read_thread = start_tcp_read_thread(config, active_flag.clone(), com_read, tcp_listener);
 
     Ok(ActiveBinding{ 
-        worker: tcp_read_thread,
+        worker: Option::from(tcp_read_thread),
         active : active_flag,
         config : config.clone(),
     })

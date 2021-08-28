@@ -21,10 +21,12 @@ host="172.26.192.1:6001"
 `Serial2Tcp_RS.exe --config <ini file>.ini`
 
 One can also launch the relay using command line arguments:
-`Serial2Tcp_RS.exe --host="172.26.192.1:6000" --baud="115200" --comport="COM4"
+`Serial2Tcp_RS.exe --host="172.26.192.1:6000" --baud="115200" --comport="COM4"`
 
 From WSL2, one can then launch `socat` to complete the bridge. E.g:
 `sudo socat pty,link=dev/ttyUSB0,raw,nonblock tcp:172.26.192.1:6000`
 
-## Security
+## Notes
+So far, the serial format is hardcoded as 8-N-1 with no flow control, as this seems to be the standard for almost every serial device I've encountered. We could add more configurations as they become useful.
+
 It goes without saying that there is absolutely no authentication/security provided by this relay. Be mindful of who has access to your binding :)
