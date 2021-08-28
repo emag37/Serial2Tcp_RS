@@ -1,0 +1,133 @@
+diff --git a/Cargo.toml b/Cargo.toml
+index 645966e..021023f 100644
+--- a/Cargo.toml
++++ b/Cargo.toml
+@@ -37,7 +37,7 @@ regex = "1.0"
+ [target."cfg(windows)".dependencies.winapi]
+ version = "0.3.6"
+ features = ["cguid", "commapi", "errhandlingapi", "fileapi", "guiddef", "handleapi", "minwinbase",
+-            "minwindef", "ntdef", "setupapi", "winbase", "winerror", "winnt"]
++            "minwindef", "ntdef", "setupapi", "winbase", "winerror", "winnt", "ioapiset"]
+ 
+ [target.'cfg(any(target_os = "ios", target_os = "macos"))'.dependencies]
+ IOKit-sys = "0.1"
+diff --git a/src/windows/com.rs b/src/windows/com.rs
+index b54bd0c..d993633 100644
+--- a/src/windows/com.rs
++++ b/src/windows/com.rs
+@@ -4,13 +4,16 @@ use std::time::Duration;
+ use std::{io, ptr};
+ 
+ use winapi::shared::minwindef::*;
++use winapi::shared::winerror::*;
+ use winapi::um::commapi::*;
++use winapi::um::ioapiset::GetOverlappedResult;
+ use winapi::um::fileapi::*;
+ use winapi::um::handleapi::*;
+ use winapi::um::processthreadsapi::GetCurrentProcess;
+ use winapi::um::winbase::*;
++use winapi::um::minwinbase::{OVERLAPPED};
+ use winapi::um::winnt::{
+-    DUPLICATE_SAME_ACCESS, FILE_ATTRIBUTE_NORMAL, GENERIC_READ, GENERIC_WRITE, HANDLE,
++    DUPLICATE_SAME_ACCESS, GENERIC_READ, GENERIC_WRITE, HANDLE,
+ };
+ 
+ use crate::windows::dcb;
+@@ -19,6 +22,8 @@ use crate::{
+     SerialPortBuilder, StopBits,
+ };
+ 
++const ERR_IO_PENDING_I32: i32 = ERROR_IO_PENDING as i32;
++
+ /// A serial port implementation for Windows COM ports
+ ///
+ /// The port will be closed when the value is dropped. However, this struct
+@@ -63,7 +68,7 @@ impl COMPort {
+                 0,
+                 ptr::null_mut(),
+                 OPEN_EXISTING,
+-                FILE_ATTRIBUTE_NORMAL,
++                FILE_FLAG_OVERLAPPED,
+                 0 as HANDLE,
+             )
+         };
+@@ -176,6 +181,7 @@ impl FromRawHandle for COMPort {
+ impl io::Read for COMPort {
+     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+         let mut len: DWORD = 0;
++        let mut overlap : OVERLAPPED = unsafe {std::mem::zeroed()};
+ 
+         match unsafe {
+             ReadFile(
+@@ -183,27 +189,28 @@ impl io::Read for COMPort {
+                 buf.as_mut_ptr() as LPVOID,
+                 buf.len() as DWORD,
+                 &mut len,
+-                ptr::null_mut(),
++                &mut overlap,
+             )
+         } {
+-            0 => Err(io::Error::last_os_error()),
+-            _ => {
+-                if len != 0 {
+-                    Ok(len as usize)
+-                } else {
+-                    Err(io::Error::new(
+-                        io::ErrorKind::TimedOut,
+-                        "Operation timed out",
+-                    ))
++            0 => {
++                    match io::Error::last_os_error().raw_os_error() {
++                        Some(ERR_IO_PENDING_I32) => match unsafe {GetOverlappedResult(self.handle, &mut overlap, &mut len, true as i32)} {
++                            0 => Err(io::Error::last_os_error()),
++                            _ => Ok(len as usize)
++                           }
++                        _ => Err(io::Error::last_os_error())
++                    }
+                 }
+-            }
++            _ => {Ok(len as usize)},
+         }
+     }
+ }
+ 
++
+ impl io::Write for COMPort {
+     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+         let mut len: DWORD = 0;
++        let mut overlap : OVERLAPPED = unsafe {std::mem::zeroed()};
+ 
+         match unsafe {
+             WriteFile(
+@@ -211,11 +218,19 @@ impl io::Write for COMPort {
+                 buf.as_ptr() as LPVOID,
+                 buf.len() as DWORD,
+                 &mut len,
+-                ptr::null_mut(),
++                &mut overlap,
+             )
+         } {
+-            0 => Err(io::Error::last_os_error()),
+-            _ => Ok(len as usize),
++            0 => {
++                    match io::Error::last_os_error().raw_os_error() {
++                        Some(ERR_IO_PENDING_I32) => match unsafe {GetOverlappedResult(self.handle, &mut overlap, &mut len, true as i32)} {
++                            0 => Err(io::Error::last_os_error()),
++                            _ => Ok(len as usize)
++                           }
++                        _ => Err(io::Error::last_os_error())
++                    }
++                }
++            _ => {Ok(len as usize)},
+         }
+     }
+ 
+@@ -240,7 +255,7 @@ impl SerialPort for COMPort {
+         let milliseconds = timeout.as_secs() * 1000 + timeout.subsec_nanos() as u64 / 1_000_000;
+ 
+         let mut timeouts = COMMTIMEOUTS {
+-            ReadIntervalTimeout: 0,
++            ReadIntervalTimeout: 20,
+             ReadTotalTimeoutMultiplier: 0,
+             ReadTotalTimeoutConstant: milliseconds as DWORD,
+             WriteTotalTimeoutMultiplier: 0,
