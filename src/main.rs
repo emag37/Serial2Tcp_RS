@@ -9,8 +9,17 @@ fn main() {
         binding::start_workers(&c).unwrap()
     }).collect();
 
-    println!("Started {} workers...", active_bindings.len());
+    println!("[MAIN]: Started {} workers. Press 'q' to exit.", active_bindings.len());
+    let getch = getch::Getch::new();
+
     loop {
-        std::thread::sleep(std::time::Duration::from_secs(1));
+        match getch.getch() {
+            Ok(b'q') => {
+                println!("bye!");
+                std::process::exit(0);
+            }
+            Ok(_) => {}
+            Err(_)=> {println!("Error reading character...")}
+        }
     }
 }

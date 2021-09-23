@@ -58,7 +58,7 @@ fn start_tcp_read_thread(config: &BindingConfig, active_flag: Arc<AtomicBool>, t
             };
             
             println!("{}: Got a connection, beginning relay.", config);
-            let tcp_stream_read =  match tcp_stream_write.try_clone() {
+            let mut tcp_stream_read =  match tcp_stream_write.try_clone() {
                 Ok(stream) => stream,
                 Err(err) => {
                     println!("Error cloning TCP stream for read: {}", err);
@@ -70,28 +70,27 @@ fn start_tcp_read_thread(config: &BindingConfig, active_flag: Arc<AtomicBool>, t
             let tcp_write_thread = start_tcp_write_thread(&config, writer_active_flag.clone(), com.try_clone_native().unwrap(), tcp_stream_write);
 
             let mut buf : [u8;1500] = [0;1500];
-            
-            let mut tcp_stream_read = tcp_stream_read;
             let mut com_write = com.try_clone_native().unwrap();
 
             loop {
-                let n_read = match tcp_stream_read.read(&mut buf) {
-                    Ok(n) => n,
+                match tcp_stream_read.read(&mut buf) {
+                    Ok(0) => {},
+                    Ok(n) => {
+                        match com_write.write(&mut buf[..n]) {
+                            Ok(_)=> {},
+                            Err(err) => {
+                                println!("{}: Error writing to COM port: {}", config, err);
+                                break
+                            }
+                        }
+                    },
                     Err(err) => {
                         println!("{}: Error reading from TCP stream: {}", config, err);
                         break
                     },
                 };
-                if n_read > 0 {
-                    match com_write.write(&mut buf[..n_read]) {
-                        Ok(_) => {},
-                        Err(err) => {
-                            println!("{}: Error writing to COM port: {}", config, err);
-                            break
-                        },
-                    }
-                }
             }
+
             std::mem::drop(com);
             std::mem::drop(tcp_stream_read);
             writer_active_flag.store(false, std::sync::atomic::Ordering::Release);
@@ -105,31 +104,30 @@ fn start_tcp_read_thread(config: &BindingConfig, active_flag: Arc<AtomicBool>, t
 
 fn start_tcp_write_thread(config: &BindingConfig, active_flag: Arc<AtomicBool>, com: serialport::COMPort, tcp: TcpStream) -> std::thread::JoinHandle<()> {
     let config_for_tcp_writer = config.clone();
+
     std::thread::spawn(move || {
         let mut buf : [u8;1500] = [0;1500];
-
         let mut com_read = com;
         let mut tcp_stream_write = tcp;
-
+        let _ = tcp_stream_write.set_nodelay(true);
+        
         while active_flag.load(std::sync::atomic::Ordering::Acquire) {
-            let n_read = match com_read.read(&mut buf){
-                Ok(n_bytes) => n_bytes,
+            match com_read.read(&mut buf) {
+                Ok(0) => {},
+                Ok(n_bytes) => {
+                    match tcp_stream_write.write(&mut buf[..n_bytes]) {
+                        Ok(_) => {},
+                        Err(err) => {
+                            println!("{}: Error writing from host: {}", config_for_tcp_writer, err);
+                        }
+                    }
+                },
                 Err(ec) => {
                     if ec.kind() != std::io::ErrorKind::TimedOut {
                         println!("{}: Error reading from port: {}", config_for_tcp_writer, ec);
                     }
-                    0
                 }
             };
-
-            if n_read > 0 {
-                match tcp_stream_write.write(&mut buf[..n_read]) {
-                    Ok(_) => {},
-                    Err(err) => {
-                        println!("{}: Error writing from host: {}", config_for_tcp_writer, err);
-                    }
-                }
-            }
         }
     })
 }
