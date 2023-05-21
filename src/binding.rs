@@ -67,7 +67,7 @@ fn start_tcp_read_thread(config: &BindingConfig, active_flag: Arc<AtomicBool>, t
             };
             
             let writer_active_flag = Arc::new(AtomicBool::new(true));
-            let tcp_write_thread = start_tcp_write_thread(&config, writer_active_flag.clone(), com.try_clone_native().unwrap(), tcp_stream_write);
+            let tcp_write_thread = start_tcp_write_thread(&config, writer_active_flag.clone(), Box::new(com.try_clone_native().unwrap()), tcp_stream_write);
 
             let mut buf : [u8;1500] = [0;1500];
             let mut com_write = com.try_clone_native().unwrap();
@@ -102,7 +102,7 @@ fn start_tcp_read_thread(config: &BindingConfig, active_flag: Arc<AtomicBool>, t
     })
 }
 
-fn start_tcp_write_thread(config: &BindingConfig, active_flag: Arc<AtomicBool>, com: serialport::COMPort, tcp: TcpStream) -> std::thread::JoinHandle<()> {
+fn start_tcp_write_thread(config: &BindingConfig, active_flag: Arc<AtomicBool>, com: Box<dyn serialport::SerialPort>, tcp: TcpStream) -> std::thread::JoinHandle<()> {
     let config_for_tcp_writer = config.clone();
 
     std::thread::spawn(move || {

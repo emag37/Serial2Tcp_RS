@@ -1,4 +1,4 @@
-use clap::{Arg, App};
+use clap::{Command,Arg};
 use std::vec::Vec;
 use std::string::String;
 use ini::*;
@@ -6,50 +6,47 @@ use ini::*;
 use crate::binding::BindingConfig;
 
 pub fn parse_cli() -> Result<Vec<BindingConfig>, ini::Error> {
-    let arg_matches = App::new("Serial2Tcp")
+    
+    let arg_matches = Command::new("Serial2Tcp")
     .version("0.1")
     .author("Eric M.")
     .about("Relays Serial data to/from a TCP socket")
-    .arg(Arg::with_name("config")
-         .short("c")
+    .arg(Arg::new("config")
+         .short('c')
          .long("config")
          .value_name("INI file")
          .conflicts_with_all(&["baudrate","host", "comport"])
-         .help("Load binding configs from an INI file")
-         .takes_value(true))
-    .arg(Arg::with_name("baudrate")
-         .short("b")
+         .help("Load binding configs from an INI file"))
+    .arg(Arg::new("baudrate")
+         .short('b')
          .long("baudrate")
          .value_name("Baudrate")
          .conflicts_with("config")
-         .default_value_if("host", None, "115200")
-         .help("Baudrate for COM port")
-         .takes_value(true))
-    .arg(Arg::with_name("host")
-         .short("h")
+         .default_value("115200")
+         .help("Baudrate for COM port"))
+    .arg(Arg::new("host")
+         .short('o')
          .long("host")
          .value_name("TCP Host")
-         .required_unless("config")
-         .help("TCP host address and port, format : x.x.x.x:<port>")
-         .takes_value(true))
-    .arg(Arg::with_name("comport")
-         .short("p")
+         .required_unless_present("config")
+         .help("TCP host address and port, format : x.x.x.x:<port>"))
+    .arg(Arg::new("comport")
+         .short('p')
          .long("comport")
          .value_name("COM Port")
-         .required_unless("config")
-         .help("COM port, i.e: COMx")
-         .takes_value(true))
+         .required_unless_present("config")
+         .help("COM port, i.e: COMx"))
     .get_matches();
     
-    if arg_matches.is_present("config") {
-        return parse_ini(arg_matches.value_of("config").unwrap());
+    if let Some(cfg_file) = arg_matches.get_one::<String>("config") {
+        return parse_ini(cfg_file);
     }
 
 
     Ok(vec!(BindingConfig {
-        baud_rate: arg_matches.value_of("baudrate").unwrap_or("115200").parse::<u32>().unwrap_or(115200),
-        com_port: String::from(arg_matches.value_of("comport").unwrap()),
-        tcp_host: String::from(arg_matches.value_of("host").unwrap())
+        baud_rate: arg_matches.get_one::<String>("baudrate").unwrap_or(&"115200".to_string()).parse::<u32>().unwrap_or(115200),
+        com_port: String::from(arg_matches.get_one::<String>("comport").unwrap()),
+        tcp_host: String::from(arg_matches.get_one::<String>("host").unwrap())
 
     }))
 }
